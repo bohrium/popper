@@ -20,7 +20,7 @@ LEARN_RATE = 0.001
 
 H = 28 
 W = 28
-NB_SEGS = 6
+NB_SEGS = 10
 DATA_DIM = H*W
 LATENT_DIM = 20
 NOISE_DIM = LATENT_DIM
@@ -71,7 +71,7 @@ class Decoder(object):
         xs = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 1], axis=2), axis=2))
         ye = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 2], axis=2), axis=2))
         xe = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 3], axis=2), axis=2))
-        t  = 0.02 + 0.2 * clip(tf.expand_dims(tf.expand_dims(line_segs[: , : , 4], axis=2), axis=2))
+        t  = 0.01 + 0.1 * tf.exp(tf.expand_dims(tf.expand_dims(line_segs[: , : , 4], axis=2), axis=2))
 
         yc = (1.0/H) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(H)), axis=1), axis=0), axis=0), dtype=tf.float32)
         xc = (1.0/W) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(W)), axis=0), axis=0), axis=0), dtype=tf.float32)
