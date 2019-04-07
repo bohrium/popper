@@ -14,13 +14,15 @@ import numpy as np
 import imageio
 
 BATCH_SIZE = 64
-NB_UPDATES = 2001
-CONCISENESS = 50
+NB_UPDATES = 5001
+CONCISENESS = 100
 LEARN_RATE = 0.001
+
+DIGIT = 3
 
 H = 28 
 W = 28
-NB_SEGS = 10
+NB_SEGS = 6
 DATA_DIM = H*W
 LATENT_DIM = 20
 NOISE_DIM = LATENT_DIM
@@ -63,7 +65,7 @@ class Decoder(object):
         hidden = lrelu(tf.matmul(latent, self.weighta))
         out = tf.matmul(hidden, self.weightb)
 
-        s = 0.1 + 0.1 * tf.exp(10.0*self.weightc)
+        s = 0.005 + 0.1 * tf.exp(10.0*self.weightc)
         stdvs = tf.stack([s]*BATCH_SIZE, axis=0)
 
         line_segs = tf.reshape(out[: , :NB_SEGS*5], [-1, NB_SEGS, 5])
@@ -71,7 +73,7 @@ class Decoder(object):
         xs = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 1], axis=2), axis=2))
         ye = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 2], axis=2), axis=2))
         xe = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 3], axis=2), axis=2))
-        t  = 0.01 + 0.1 * tf.exp(tf.expand_dims(tf.expand_dims(line_segs[: , : , 4], axis=2), axis=2))
+        t  = 0.005 + 0.1 * tf.exp(tf.expand_dims(tf.expand_dims(line_segs[: , : , 4], axis=2), axis=2))
 
         yc = (1.0/H) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(H)), axis=1), axis=0), axis=0), dtype=tf.float32)
         xc = (1.0/W) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(W)), axis=0), axis=0), axis=0), dtype=tf.float32)
@@ -84,6 +86,45 @@ class Decoder(object):
         means = tf.reshape(tf.exp(means), [-1, DATA_DIM])
 
         return tf.concat([means, stdvs], axis=1) 
+
+    def colored(self, latent): 
+        hidden = lrelu(tf.matmul(latent, self.weighta))
+        out = tf.matmul(hidden, self.weightb)
+
+        line_segs = tf.reshape(out[: , :NB_SEGS*5], [-1, NB_SEGS, 5])
+        ys = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 0], axis=2), axis=2))
+        xs = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 1], axis=2), axis=2))
+        ye = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 2], axis=2), axis=2))
+        xe = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 3], axis=2), axis=2))
+        t  = 0.005 + 0.1 * tf.exp(tf.expand_dims(tf.expand_dims(line_segs[: , : , 4], axis=2), axis=2))
+
+        yc = (1.0/H) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(H)), axis=1), axis=0), axis=0), dtype=tf.float32)
+        xc = (1.0/W) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(W)), axis=0), axis=0), axis=0), dtype=tf.float32)
+
+        logthereness = (
+             tf.sqrt(1e-4 + tf.square(ys-ye) + tf.square(xs-xe))
+            -tf.sqrt(1e-4 + tf.square(ys-yc) + tf.square(xs-xc))
+            -tf.sqrt(1e-4 + tf.square(yc-ye) + tf.square(xc-xe))
+        )/t
+
+        colors = tf.constant([
+            [1.0, 0.5, 0.0],
+            [1.0, 0.0, 0.5],
+            [0.5, 1.0, 0.0],
+            [0.0, 1.0, 0.5],
+            [0.5, 0.0, 1.0],
+            [0.0, 0.5, 1.0],
+            [0.75, 0.75, 0.00],
+            [0.75, 0.00, 0.75],
+            [0.00, 0.75, 0.75],
+            [0.5 , 0.5 , 0.5 ],
+        ])
+
+        indices = tf.argmax(logthereness, axis=1) 
+        there =   tf.expand_dims(tf.exp(tf.reduce_max(logthereness, axis=1)), axis=3)
+        colored = tf.gather_nd(colors, tf.expand_dims(indices, 3)) * there
+
+        return tf.reshape(colored, [-1, DATA_DIM, 3])
 
 
 def latent_sampler(noise, latent_distr):
@@ -125,6 +166,7 @@ class VAE(object):
         sample = latent_sampler(self.latent_noise, latent_distribution) 
         self.recon_distribution = decoder(sample)
         self.recon = data_sampler(self.data_noise, self.recon_distribution)
+        self.colored = decoder.colored(sample)
 
         self.reconstruction_loss = neg_log_likelihood(self.data, self.recon_distribution) 
         self.regularization_loss = kl_to_target(latent_distribution)
@@ -140,13 +182,13 @@ from tensorflow.examples.tutorials.mnist import input_data
 mnist = input_data.read_data_sets('MNIST_data', one_hot=False)
 imgs, lbls = mnist.train.images, mnist.train.labels
 imgs = np.reshape(imgs, (-1, DATA_DIM))
-eights = (lbls==8)
+eights = (lbls==DIGIT)
 imgs = imgs[eights]
 lbls = lbls[eights]
 
 timgs, tlbls = mnist.test.images, mnist.test.labels
 timgs = np.reshape(timgs, (-1, DATA_DIM))
-teights = (tlbls==8)
+teights = (tlbls==DIGIT)
 timgs = timgs[teights]
 tlbls = tlbls[teights]
 
@@ -176,17 +218,24 @@ with tf.Session() as sess:
         if i%CONCISENESS==0:
             print('step %4d \t loss %6.2f' % (i, l))
             b = get_batch('test')
+            b = [b[i-i%2] for i in range(len(b))]
             n = get_latent_noise()
             d = get_data_noise()
-            r, s = sess.run([V.recon_distribution[0,:DATA_DIM],
-                             V.recon_distribution[0,DATA_DIM:]], feed_dict={V.latent_noise:n, V.data:b, V.data_noise:d})
-            d = np.maximum(0, np.minimum(1, 0.1*np.abs(r-b[0])/s))
+            c, r, s = sess.run([V.colored[:,:,:],
+                V.recon_distribution[:,:DATA_DIM],
+                V.recon_distribution[:,DATA_DIM:]], feed_dict={V.latent_noise:n, V.data:b, V.data_noise:d})
+            d = np.maximum(0, np.minimum(1, 0.1*np.abs(r-b)/s))
             r = np.maximum(0, np.minimum(1, r))
             s = np.maximum(0, np.minimum(1, s))
+            c = np.maximum(0, np.minimum(1, c))
+
             side_by_side = np.concatenate([
-                np.reshape(b[0], (H, W)), 
-                np.reshape(r, (H, W)),
-                np.reshape(s, (H, W)),
-                np.reshape(d, (H, W))
-                ], axis=1) 
+                np.concatenate([
+                    np.reshape(np.stack([b[i]]*3, axis=1), (H, W, 3)), 
+                    np.reshape(np.stack([r[i]]*3, axis=1), (H, W, 3)),
+                    np.reshape(np.stack([s[i]]*3, axis=1), (H, W, 3)),
+                    np.reshape(np.stack([d[i]]*3, axis=1), (H, W, 3)),
+                    np.reshape(          c[i],             (H, W, 3)),
+                ], axis=1)
+            for i in range(4)], axis=0)
             imageio.imwrite('r%04d.png'%i, (255*side_by_side).astype(np.uint8))
