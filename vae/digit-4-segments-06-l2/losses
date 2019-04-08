@@ -1,0 +1,22 @@
+step    0    train loss 63329.75     test loss 64506.53      other loss 48542.18
+step  250    train loss  5039.41     test loss  4155.05      other loss  5040.85
+step  500    train loss  3114.00     test loss  2860.15      other loss  2795.67
+step  750    train loss  2396.08     test loss  2007.54      other loss  2730.34
+step 1000    train loss  2270.38     test loss  1330.90      other loss  2208.74
+step 1250    train loss  1638.31     test loss  1208.47      other loss  1612.95
+step 1500    train loss  1673.54     test loss  1330.80      other loss   658.02
+step 1750    train loss  1433.44     test loss   778.76      other loss  1240.41
+step 2000    train loss  1173.91     test loss   929.08      other loss  1378.51
+step 2250    train loss  1193.97     test loss   900.26      other loss   992.10
+step 2500    train loss   990.85     test loss   848.96      other loss  2126.76
+step 2750    train loss   956.35     test loss   581.59      other loss   518.16
+step 3000    train loss   761.25     test loss   558.37      other loss  1355.84
+step 3250    train loss   816.95     test loss   602.96      other loss  1763.16
+step 3500    train loss   546.82     test loss   507.04      other loss  1470.83
+step 3750    train loss   611.00     test loss   748.78      other loss   981.29
+step 4000    train loss   646.70     test loss   271.07      other loss  2256.94
+step 4250    train loss   769.92     test loss   575.87      other loss  1245.10
+step 4500    train loss   581.67     test loss   392.92      other loss  1477.44
+step 4750    train loss   523.55     test loss   444.18      other loss   961.92
+step 5000    train loss   640.50     test loss   335.93      other loss  1869.27
+
