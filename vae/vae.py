@@ -22,7 +22,7 @@ DIGIT = 8
 
 H = 28 
 W = 28
-NB_SEGS = 10
+NB_SEGS = 6
 DATA_DIM = H*W
 LATENT_DIM = 16
 NOISE_DIM = LATENT_DIM
@@ -68,6 +68,9 @@ class Decoder(object):
         self.biasc = tf.get_variable('%s-biasc'%name, shape=[1, 1], dtype=tf.float32,
                 initializer=tf.random_normal_initializer(stddev=0.01))
 
+    def prior_loss(self):
+        return 0.0 #100.*(tf.reduce_mean(tf.abs(self.weighta)) + tf.reduce_mean(tf.abs(self.weightb)))
+
     def __call__(self, latent): 
         hidden = lrelu(tf.matmul(latent, self.weighta) + self.biasa)
         out = tf.matmul(hidden, self.weightb)
@@ -79,6 +82,7 @@ class Decoder(object):
         xe = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 3], axis=2), axis=2))
         t  = 0.005 + 0.1 * tf.exp(tf.expand_dims(tf.expand_dims(line_segs[: , : , 4], axis=2), axis=2))
 
+
         yc = (1.0/H) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(H)), axis=1), axis=0), axis=0), dtype=tf.float32)
         xc = (1.0/W) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(W)), axis=0), axis=0), axis=0), dtype=tf.float32)
 
@@ -87,6 +91,8 @@ class Decoder(object):
                -tf.sqrt(1e-4 + tf.square(ys-yc) + tf.square(xs-xc))
                -tf.sqrt(1e-4 + tf.square(yc-ye) + tf.square(xc-xe))
         )/t
+        logth = -tf.square(logth)
+        #logth = tf.maximum(-tf.square(logth), 10.0*logth)
         means = tf.exp(tf.reduce_max(logth, axis=1))
         means = tf.reshape(means, [-1, DATA_DIM])
 
@@ -108,27 +114,35 @@ class Decoder(object):
         yc = (1.0/H) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(H)), axis=1), axis=0), axis=0), dtype=tf.float32)
         xc = (1.0/W) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(W)), axis=0), axis=0), axis=0), dtype=tf.float32)
 
-        logthereness = (
+        logth= (
              tf.sqrt(1e-4 + tf.square(ys-ye) + tf.square(xs-xe))
             -tf.sqrt(1e-4 + tf.square(ys-yc) + tf.square(xs-xc))
             -tf.sqrt(1e-4 + tf.square(yc-ye) + tf.square(xc-xe))
         )/t
+        logth = -tf.square(logth)
+        #logth = tf.maximum(-tf.square(logth), 10.0*logth)
 
         colors = tf.constant([
             [1.0, 0.6, 0.1],
             [1.0, 0.1, 0.6],
-            [0.7, 1.0, 0.0],
-            [0.0, 1.0, 0.7],
+            [0.8, 0.9, 0.0],
+            [0.0, 0.9, 0.8],
             [0.6, 0.1, 1.0],
             [0.1, 0.6, 1.0],
-            [0.75, 0.75, 0.00],
-            [0.75, 0.00, 0.75],
-            [0.00, 0.75, 0.75],
-            [0.5 , 0.5 , 0.5 ],
+            #[0.00, 0.00, 1.00],
+            #[0.00, 1.00, 0.00],
+            #[1.00, 0.00, 0.00],
+            #[0.25, 0.25, 0.75],
+            #[0.25, 0.75, 0.25],
+            #[0.75, 0.25, 0.25],
+            #[0.75, 0.75, 0.00],
+            #[0.75, 0.00, 0.75],
+            #[0.00, 0.75, 0.75],
+            #[0.5 , 0.5 , 0.5 ],
         ])
 
-        indices = tf.argmax(logthereness, axis=1) 
-        there =   tf.expand_dims(tf.exp(tf.reduce_max(logthereness, axis=1)), axis=3)
+        indices = tf.argmax(logth, axis=1) 
+        there =   tf.expand_dims(tf.exp(tf.reduce_max(logth, axis=1)), axis=3)
         colored = tf.gather_nd(colors, tf.expand_dims(indices, 3)) * there
 
         return tf.reshape(colored, [-1, DATA_DIM, 3])
@@ -154,7 +168,7 @@ def kl_to_target(latent_distr):
     ) / 2.0
 
 def neg_log_likelihood(data, data_distr):
-    ''' variable-scale L1 norm
+    ''' variable-scale L2 norm
     '''
     means = data_distr[: , :DATA_DIM] 
     stdvs = data_distr[: , DATA_DIM:] 
@@ -179,7 +193,8 @@ class VAE(object):
         self.reconstruction_loss = neg_log_likelihood(self.data, self.recon_distribution) 
         self.regularization_loss = kl_to_target(latent_distribution)
         self.losses = self.reconstruction_loss + self.regularization_loss
-        self.loss = tf.reduce_mean(self.losses)
+        self.prior_loss = decoder.prior_loss()
+        self.loss = tf.reduce_mean(self.losses) + self.prior_loss
 
         self.update = tf.train.AdamOptimizer(LEARN_RATE).minimize(self.loss)
 
