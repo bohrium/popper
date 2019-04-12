@@ -92,7 +92,6 @@ class Decoder(object):
                -tf.sqrt(1e-4 + tf.square(yc-ye) + tf.square(xc-xe))
         )/t
         logth = -tf.square(logth)
-        #logth = tf.maximum(-tf.square(logth), 10.0*logth)
         means = tf.exp(tf.reduce_max(logth, axis=1))
         means = tf.reshape(means, [-1, DATA_DIM])
 
@@ -120,7 +119,6 @@ class Decoder(object):
             -tf.sqrt(1e-4 + tf.square(yc-ye) + tf.square(xc-xe))
         )/t
         logth = -tf.square(logth)
-        #logth = tf.maximum(-tf.square(logth), 10.0*logth)
 
         colors = tf.constant([
             [1.0, 0.6, 0.1],
