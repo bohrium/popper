@@ -17,22 +17,23 @@ import imageio
 ################################################################################
 
 BATCH_SIZE = 64
-NB_UPDATES = 5001
+NB_UPDATES = 10001
 CONCISENESS = 10
-LEARN_RATE = 0.001
+LEARN_RATE_MAX = 0.001
+LEARN_RATE_MIN = 0.0001
 
 H = 28 
 W = 28
 NB_SEGS = 6
 DATA_DIM = H*W
-LATENT_DIM = 16
+LATENT_DIM = 32
 NOISE_DIM = LATENT_DIM
 LATENT_DISTR_DIM = 2*LATENT_DIM
-DATA_DISTR_DIM = NB_SEGS*5
+DATA_DISTR_DIM = NB_SEGS*6
 
-DATA_SHAPE = [BATCH_SIZE, DATA_DIM] 
-LATENT_NOISE_SHAPE = [BATCH_SIZE, NOISE_DIM] 
-DATA_NOISE_SHAPE = [BATCH_SIZE, DATA_DIM] 
+DATA_SHAPE = [None, DATA_DIM] 
+LATENT_NOISE_SHAPE = [None, NOISE_DIM] 
+DATA_NOISE_SHAPE = [None, DATA_DIM] 
 
 ################################################################################
 #   1. DEFINE MODEL                                                            #
@@ -41,7 +42,7 @@ DATA_NOISE_SHAPE = [BATCH_SIZE, DATA_DIM]
 def lrelu(layer):
     return tf.maximum(0.2*layer, layer)
 def clip(layer):
-    return tf.maximum(0.0, tf.minimum(1.0, layer))
+    return tf.maximum(0.00, tf.minimum(1.00, layer))
 
 class Encoder(object):
     def __init__(self, name='enc', HIDDEN_DIM=32):
@@ -77,27 +78,61 @@ class Decoder(object):
         hidden = lrelu(tf.matmul(latent, self.weighta) + self.biasa)
         out = tf.matmul(hidden, self.weightb)
 
-        line_segs = tf.reshape(out[: , :NB_SEGS*5], [-1, NB_SEGS, 5])
-        ys = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 0], axis=2), axis=2))
-        xs = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 1], axis=2), axis=2))
-        ye = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 2], axis=2), axis=2))
-        xe = clip(0.5 + 0.5*tf.expand_dims(tf.expand_dims(line_segs[: , : , 3], axis=2), axis=2))
-        t  = 0.005 + 0.1 * tf.exp(tf.expand_dims(tf.expand_dims(line_segs[: , : , 4], axis=2), axis=2))
-
+        line_segs = tf.reshape(out[: , :NB_SEGS*6], [-1, NB_SEGS, 6])
+        ys = clip(0.5 + 0.4*tf.expand_dims(tf.expand_dims(line_segs[: , : , 0], axis=2), axis=2))
+        xs = clip(0.5 + 0.4*tf.expand_dims(tf.expand_dims(line_segs[: , : , 1], axis=2), axis=2))
+        ye = clip(0.5 + 0.4*tf.expand_dims(tf.expand_dims(line_segs[: , : , 2], axis=2), axis=2))
+        xe = clip(0.5 + 0.4*tf.expand_dims(tf.expand_dims(line_segs[: , : , 3], axis=2), axis=2))
+        t  = 0.005 + 0.05* tf.sigmoid(-1.0 + tf.expand_dims(tf.expand_dims(line_segs[: , : , 4], axis=2), axis=2))
+        b  =          0.5*tf.tanh(tf.expand_dims(tf.expand_dims(line_segs[: , : , 5], axis=2), axis=2))
 
         yc = (1.0/H) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(H)), axis=1), axis=0), axis=0), dtype=tf.float32)
         xc = (1.0/W) * tf.constant(np.expand_dims(np.expand_dims(np.expand_dims(np.arange(float(W)), axis=0), axis=0), axis=0), dtype=tf.float32)
 
+        ybar   = ye-ys
+        xbar   = xe-xs
+
+        yshift = yc-ys  
+        xshift = xc-xs 
+
+        scale = tf.sqrt(1e-6 + tf.square(ybar) + tf.square(xbar))
+        b = b/scale
+
+        dota = (yshift*ybar + xshift*xbar)/scale
+        dotb = (yshift*xbar - xshift*ybar)/scale  +  b*tf.square(dota)
+
         logth = (
-                tf.sqrt(1e-4 + tf.square(ys-ye) + tf.square(xs-xe))
-               -tf.sqrt(1e-4 + tf.square(ys-yc) + tf.square(xs-xc))
-               -tf.sqrt(1e-4 + tf.square(yc-ye) + tf.square(xc-xe))
+                tf.sqrt(1e-6 + tf.square(   0-scale) + tf.square(   0-b*tf.square(scale)))
+               -tf.sqrt(1e-6 + tf.square(   0- dota) + tf.square(   0-dotb              ))
+               -tf.sqrt(1e-6 + tf.square(dota-scale) + tf.square(dotb-b*tf.square(scale)))
         )/t
-        logth = -tf.square(logth)
-        means = tf.exp(tf.reduce_max(logth, axis=1))
+        logth = tf.reduce_max(logth, axis=1)
+        means = tf.exp(-tf.square(logth))
         means = tf.reshape(means, [-1, DATA_DIM])
 
-        stdvs = 0.04 + 0.1 * tf.exp(0.1 * tf.matmul(latent, self.weightc)) + 0.0*means
+        stdvs = 1.0/256 + 0.1 * tf.exp(0.1 * tf.matmul(latent, self.weightc)) + 0.0*means
+
+        #d = lambda a,b: np.sqrt(np.square(a[0]-b[0]) + np.square(a[1]-b[1])) 
+        #def transform(start, end, coor, bend=0.0):
+        #    mid = [(start[0]+end[0])/2, (start[1]+end[1])/2]
+        #    scale = d(end, mid) 
+        #    dotA = ((coor[0] - mid[0]) * (end[0] - mid[0]) + (coor[1] - mid[1]) * (end[1] - mid[1]))/(1e-4+scale)
+        #    dotB = ((coor[0] - mid[0]) * (end[1] - mid[1]) - (coor[1] - mid[1]) * (end[0] - mid[0]))/(1e-4+scale)
+        #    return [
+        #        dotA,
+        #        dotB - bend * np.square(dotA)
+        #    ]
+        #
+        #def render(line_segs): 
+        #    canvas = np.zeros((H, W), np.float32)
+        #    for (start, end, thick, bend) in line_segs:
+        #        s = transform(start, end, start, bend)
+        #        e = transform(start, end, end  , bend)
+        #        c = transform(start, end, coor , bend)
+        #        canvas = np.maximum(canvas, 
+        #            np.exp(-np.square((d(s, e)-d(s, c)-d(c, e)) / thick**2)),
+        #        )
+        #    return np.maximum(0, np.minimum(1, canvas))
 
         return tf.concat([means, stdvs], axis=1) 
 
@@ -143,7 +178,8 @@ class VAE(object):
         self.losses = self.reconstruction_loss + self.regularization_loss
         self.loss = tf.reduce_mean(self.losses)
 
-        self.update = tf.train.AdamOptimizer(LEARN_RATE).minimize(self.loss)
+        self.lr = tf.placeholder(dtype=tf.float32)
+        self.update = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
 
 class Classifier(object):
     def __init__(self):
@@ -199,7 +235,7 @@ C = Classifier()
 
 # 3.0. CREATE SAVER
 saver = tf.train.Saver()
-SAVE_PATH = 'checkpoints/conv.ckpt'
+SAVE_PATH = 'checkpoints/vae-latent32-segs06.ckpt'
 
 def get_batch(dataset):
     indices = np.random.choice(len(dataset), size=BATCH_SIZE)
@@ -211,12 +247,13 @@ def get_supervised_batch():
     indices = np.random.choice(len(imgs), size=BATCH_SIZE)
     return imgs[indices], lbls[indices]
 
-def get_latent_noise():
-    return np.random.randn(*LATENT_NOISE_SHAPE)
-def get_data_noise():
-    mags = np.random.exponential(*DATA_NOISE_SHAPE)
-    signs = 2*np.random.randint(0,2, DATA_NOISE_SHAPE) - 1
-    return signs*mags
+def get_latent_noise(bs=BATCH_SIZE):
+    return np.random.randn(*[bs if d is None else d for d in LATENT_NOISE_SHAPE])
+def get_data_noise(bs=BATCH_SIZE):
+    #mags = np.random.exponential(*[bs if d is None else d for d in DATA_NOISE_SHAPE])
+    #signs = 2*np.random.randint(0,2, [bs if d is None else d for d in DATA_NOISE_SHAPE]) - 1
+    #return signs*mags
+    return np.random.randn(*[bs if d is None else d for d in DATA_NOISE_SHAPE])
 
 with tf.Session() as sess:
     # 3.1. Load or initialize as appropriate 
@@ -268,45 +305,25 @@ with tf.Session() as sess:
             imageio.imwrite('true-%d-pred-%d-%02d%d.png'%(bl[j], p, i, j), (255*side_by_side).astype(np.uint8))
 
 
-    #trainacc, testacc = 0.0, 0.0
+    #trainacc, testacc = 0.1, 0.1
 
-    #for i in range(NB_UPDATES):
+    #for i in range(0, NB_UPDATES):
     #    for c in DIGITS:
-    #        b = get_batch(imgs_by_lbl[c]) #+ get_data_noise() / 256.0
+    #        b = get_batch(imgs_by_lbl[c]) + get_data_noise() / 256.0
     #        n = get_latent_noise()
     #        V = C.V[c]
     #        insample_losses, _ = sess.run([V.losses, V.update], feed_dict={
     #            V.data:b,
     #            V.latent_noise:n,
+    #            V.lr: np.exp((np.log(LEARN_RATE_MAX) + (np.log(LEARN_RATE_MIN) - np.log(LEARN_RATE_MAX))* float(i)/NB_UPDATES))
     #        })
     #        C.means_[c] = 0.1*np.mean(insample_losses) + 0.9*C.means_[c]
     #        C.stdvs_[c] = 0.1*np.std(insample_losses)  + 0.9*C.stdvs_[c]
 
+    #    if i%CONCISENESS:
+    #        continue
 
-    #        if i%(10*CONCISENESS): continue
-
-    #        rs = [] 
-    #        for cc in DIGITS:
-    #            n = get_latent_noise()
-    #            V = C.V[cc]
-    #            r, = sess.run([
-    #                V.recon_distribution[:,:DATA_DIM],
-    #            ], feed_dict={V.latent_noise:n, V.data:b})
-    #            rs.append(r[0])
-    #        rs = np.array(rs)
-
-    #        b = np.maximum(0, np.minimum(1, b))
-    #        rs= np.maximum(0, np.minimum(1, rs))
-
-    #        side_by_side = np.concatenate([
-    #            np.concatenate([
-    #                np.reshape(np.stack([ b[0]]*3, axis=1), (H, W, 3)), 
-    #                np.reshape(np.stack([rs[i]]*3, axis=1), (H, W, 3)),
-    #            ], axis=1)
-    #        for i in range(10)], axis=0)
-    #        imageio.imwrite('out/r-%d-%04d.png'%(c,i), (255*side_by_side).astype(np.uint8))
-
-    #    if i%CONCISENESS: continue
+    #    # accuracy:
 
     #    bi, bl = get_supervised_batch()
     #    bi = np.array([bi[int((i-i%8)/8)] for i in range(64)]) 
@@ -335,7 +352,46 @@ with tf.Session() as sess:
     #    trainacc = 0.1*train_acc_ + 0.9*trainacc
     #    testacc  = 0.1*test_acc_  + 0.9*testacc
 
+    #    if i%(25*CONCISENESS):
+    #        print('\033[1A' + ' '*(10*CONCISENESS) + '|')
+    #        print('\033[1A' + '.'*int((i%(25*CONCISENESS)/2.5)))
+    #        continue
+
+
     #    print('%d trainacc %.2f testacc %.2f; trainvae %s' % (i, trainacc, testacc, ','.join('%5d'%m for m in C.means_) ))
+    #    print()
+
+    #    if i%(25*CONCISENESS): continue
+
+    #    # renderings:
+
+    #    b = np.array([get_batch(imgs_by_lbl[c])[0] for c in DIGITS]) 
+    #    rs = [] 
+    #    for c in DIGITS:
+    #        n = get_latent_noise(bs=10)
+    #        V = C.V[c]
+    #        r, = sess.run([
+    #            V.recon_distribution[:,:DATA_DIM],
+    #            ], feed_dict={V.latent_noise:n, V.data:b})
+    #        rs.append(r)
+    #    rs = np.array(rs)
+
+    #    b = np.maximum(0, np.minimum(1, b))
+    #    rs= np.maximum(0, np.minimum(1, rs))
+
+    #    for c in DIGITS:
+    #        side_by_side = np.concatenate([
+    #            np.concatenate([
+    #                np.reshape(np.stack([ b[c]]*3, axis=1), (H, W, 3)), 
+    #                np.reshape(np.stack([rs[i][c]]*3, axis=1), (H, W, 3)),
+    #            ], axis=1)
+    #        for i in range(10)], axis=0)
+    #        imageio.imwrite('out-latent32-segs06/r-%d-%04d.png'%(c,i), (255*side_by_side).astype(np.uint8))
+
+    #    if i%(25*CONCISENESS): continue
+
+    #    print('Saving Model...')
+    #    saver.save(sess, SAVE_PATH)
 
     ## 3.4. Save
     #print('Saving Model...')
